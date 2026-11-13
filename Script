@@ -1,0 +1,1584 @@
+--[[
+    installerScripts  v4.0   |   публичный скрипт для Delta
+    Стиль: Китай (драконы, жемчужина, золото и киноварь)
+
+    ЧТО НОВОГО В 4.0:
+      - Вкладки теперь слева. При открытии экран затемняется (и слегка размывается),
+        слева выезжают вкладки, справа - само меню.
+      - 3 стиля меню (кнопка 🎡 в шапке или Settings -> Menu Style):
+          Classic - список вкладок
+          Wheel   - круговое колесо: крути пальцем / колесом мыши и выбирай вкладку
+          Tiles   - плитки-иконки
+      - Вкладка AI: ассистент отвечает на вопросы, считает, включает функции командой
+        («включи fly», «тема jade», «открой games»). Работает офлайн сразу.
+        Для свободных ответов можно подключить свой API-ключ (CONFIG.AI или Settings).
+      - Вкладка Developers (installer official, Claude)
+      - Вкладка Tools: список игроков, статистика сервера, секундомер, заметки
+      - Новые функции: Air Walk, Rainbow Trail, Light Aura
+      - Больше анимаций: вылет меню из жемчужины, прокрутка колеса, всплывающие плитки,
+        печатающийся текст в чате и т.д.
+
+    КЛЮЧИ (три независимых уровня, не складываются и не наследуются):
+      Developer - полный доступ
+      Tester    - расширенные функции и бета-скрипты
+      User      - базовые функции
+    Значения ключей меняются в CONFIG.Keys ниже.
+    Кому что доступно - задаётся строками Gate(...) в разделе "Вкладки".
+
+    Меню открывается / закрывается:
+      - тап по жемчужине с драконами (её можно перетаскивать)
+      - клавиша меню на ПК (по умолчанию RightShift, меняется в Settings)
+
+    Полёт:
+      ПК:      WASD, Space/E - вверх, Q/Ctrl - вниз
+      Телефон: джойстик + кнопки ▲ ▼ справа (появляются при включении Fly)
+]]
+
+----------------------------------------------------------------
+-- Повторный запуск: убираем старую версию
+----------------------------------------------------------------
+local env = (getgenv and getgenv()) or _G
+for _, key in ipairs({ "InstallerScriptsUnload", "DeltaHubUnload" }) do
+	if env[key] then pcall(env[key]) end
+end
+
+local VERSION = "4.0"
+
+local CONFIG = {
+	-- Вставь свои ссылки, и во вкладке Social Networks появятся кнопки копирования
+	Discord = "",
+	Telegram = "",
+	YouTube = "",
+
+	-- Ссылка "где взять ключ" (кнопка на экране ввода ключа). Пусто - кнопки не будет.
+	KeyLink = "",
+
+	-- ТРИ НЕЗАВИСИМЫХ КЛЮЧА. Каждый открывает только свой уровень доступа.
+	-- ВАЖНО: замени на свои секретные значения перед публикацией!
+	Keys = {
+		Developer = "Developer",
+		Tester = "Tester",
+		User = "User",
+	},
+
+	-- Запоминать введённый ключ в файле (если экзекутор умеет writefile)
+	SaveKey = true,
+	KeyFile = "installerScripts_key.txt",
+	NotesFile = "installerScripts_notes.txt",
+
+	-- ИИ-ассистент. Без ключа работает встроенный офлайн-режим.
+	-- Provider: "anthropic" (api.anthropic.com) или "openai" (любой OpenAI-совместимый API)
+	-- Endpoint: свой адрес API (необязательно)
+	-- НЕ публикуй свой ключ в открытом скрипте! Лучше вводить его в Settings -> AI Assistant.
+	AI = {
+		Provider = "anthropic",
+		Key = "",
+		Model = "claude-haiku-5-5",
+		Endpoint = "",
+	},
+}
+
+----------------------------------------------------------------
+-- Сервисы
+----------------------------------------------------------------
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local Stats = game:GetService("Stats")
+local MarketplaceService = game:GetService("MarketplaceService")
+local LocalPlayer = Players.LocalPlayer
+
+----------------------------------------------------------------
+-- Темы
+----------------------------------------------------------------
+local rgb = Color3.fromRGB
+
+local THEMES = {
+	Dragon = {
+		bg = rgb(15, 9, 11), side = rgb(23, 12, 14), element = rgb(36, 19, 21),
+		elementHover = rgb(52, 27, 29), stroke = rgb(104, 44, 42), off = rgb(72, 46, 48),
+		text = rgb(252, 240, 224), sub = rgb(180, 148, 138),
+		accent = rgb(214, 48, 49), accent2 = rgb(246, 196, 84),
+	},
+	Jade = {
+		bg = rgb(8, 16, 14), side = rgb(11, 23, 20), element = rgb(17, 35, 30),
+		elementHover = rgb(25, 50, 43), stroke = rgb(40, 96, 80), off = rgb(42, 66, 58),
+		text = rgb(230, 248, 240), sub = rgb(122, 164, 148),
+		accent = rgb(28, 170, 124), accent2 = rgb(242, 204, 100),
+	},
+	Azure = {
+		bg = rgb(9, 12, 22), side = rgb(12, 17, 31), element = rgb(19, 26, 46),
+		elementHover = rgb(28, 37, 64), stroke = rgb(52, 70, 126), off = rgb(46, 57, 88),
+		text = rgb(232, 238, 252), sub = rgb(132, 144, 184),
+		accent = rgb(72, 120, 255), accent2 = rgb(110, 220, 255),
+	},
+	Sakura = {
+		bg = rgb(20, 10, 16), side = rgb(28, 13, 21), element = rgb(41, 20, 31),
+		elementHover = rgb(58, 29, 44), stroke = rgb(112, 52, 84), off = rgb(78, 48, 64),
+		text = rgb(255, 238, 244), sub = rgb(188, 148, 166),
+		accent = rgb(236, 92, 144), accent2 = rgb(255, 208, 222),
+	},
+	Imperial = {
+		bg = rgb(13, 9, 20), side = rgb(19, 12, 29), element = rgb(31, 20, 46),
+		elementHover = rgb(45, 29, 66), stroke = rgb(92, 58, 130), off = rgb(62, 48, 82),
+		text = rgb(246, 238, 255), sub = rgb(160, 142, 190),
+		accent = rgb(140, 70, 220), accent2 = rgb(250, 200, 90),
+	},
+	Ink = {
+		bg = rgb(10, 10, 12), side = rgb(15, 15, 18), element = rgb(26, 26, 31),
+		elementHover = rgb(40, 40, 47), stroke = rgb(70, 70, 82), off = rgb(56, 56, 66),
+		text = rgb(240, 240, 245), sub = rgb(150, 150, 165),
+		accent = rgb(98, 114, 164), accent2 = rgb(220, 224, 240),
+	},
+}
+local THEME_ORDER = { "Dragon", "Jade", "Azure", "Sakura", "Imperial", "Ink" }
+
+local THEME = {}
+for k, v in pairs(THEMES.Dragon) do THEME[k] = v end
+
+local bindings = {}   -- свойства, которые сами меняют цвет при смене темы
+local refreshers = {} -- функции, которые перекрашивают сложные элементы
+
+----------------------------------------------------------------
+-- Вспомогательные функции
+----------------------------------------------------------------
+-- нижний регистр с поддержкой кириллицы (ё -> е)
+local function lowerU(s)
+	s = tostring(s or "")
+	local ok, res = pcall(function()
+		local out = {}
+		for _, cp in utf8.codes(s) do
+			if cp >= 0x410 and cp <= 0x42F then
+				cp = cp + 32
+			elseif cp == 0x401 or cp == 0x451 then
+				cp = 0x435
+			elseif cp >= 0x400 and cp <= 0x40F then
+				cp = cp + 80
+			elseif cp >= 65 and cp <= 90 then
+				cp = cp + 32
+			end
+			out[#out + 1] = utf8.char(cp)
+		end
+		return table.concat(out)
+	end)
+	if ok then return res end
+	return string.lower(s)
+end
+
+local function trim(s)
+	return string.match(tostring(s or ""), "^%s*(.-)%s*$")
+end
+
+local connections = {}
+local function connect(signal, fn)
+	local c = signal:Connect(fn)
+	table.insert(connections, c)
+	return c
+end
+
+-- new("Frame", { BackgroundColor3 = "@bg" })  ->  цвет берётся из темы и меняется вместе с ней
+local function new(class, props, parent)
+	local inst = Instance.new(class)
+	for k, v in pairs(props or {}) do
+		if type(v) == "string" and v:sub(1, 1) == "@" then
+			local key = v:sub(2)
+			inst[k] = THEME[key]
+			table.insert(bindings, { inst = inst, prop = k, key = key })
+		else
+			inst[k] = v
+		end
+	end
+	if parent then inst.Parent = parent end
+	return inst
+end
+
+local function tween(obj, t, props, style, dir)
+	local tw = TweenService:Create(
+		obj,
+		TweenInfo.new(t, style or Enum.EasingStyle.Quint, dir or Enum.EasingDirection.Out),
+		props
+	)
+	tw:Play()
+	return tw
+end
+
+local function corner(parent, r)
+	return new("UICorner", { CornerRadius = UDim.new(0, r) }, parent)
+end
+
+local function roundCorner(parent)
+	return new("UICorner", { CornerRadius = UDim.new(0.5, 0) }, parent)
+end
+
+local function stroke(parent, color, thickness, transparency)
+	return new("UIStroke", {
+		Color = color,
+		Thickness = thickness or 1,
+		Transparency = transparency or 0,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	}, parent)
+end
+
+-- Градиент в цветах темы. mode: nil (accent->accent2), "loop" (accent, accent2, accent), "shine" (золото с бликом)
+local function accentGradient(parent, rotation, mode)
+	local g = new("UIGradient", { Rotation = rotation or 0 }, parent)
+	local function refresh()
+		if mode == "loop" then
+			g.Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, THEME.accent),
+				ColorSequenceKeypoint.new(0.5, THEME.accent2),
+				ColorSequenceKeypoint.new(1, THEME.accent),
+			})
+		elseif mode == "shine" then
+			g.Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, THEME.accent2),
+				ColorSequenceKeypoint.new(0.5, THEME.accent2:Lerp(Color3.new(1, 1, 1), 0.8)),
+				ColorSequenceKeypoint.new(1, THEME.accent2),
+			})
+		else
+			g.Color = ColorSequence.new(THEME.accent, THEME.accent2)
+		end
+	end
+	refresh()
+	table.insert(refreshers, refresh)
+	return g
+end
+
+local function setTheme(name)
+	local t = THEMES[name]
+	if not t then return end
+	for k, v in pairs(t) do THEME[k] = v end
+	-- заодно выкидываем элементы, которые уже уничтожены
+	local alive = {}
+	for _, b in ipairs(bindings) do
+		if b.inst.Parent then
+			table.insert(alive, b)
+			pcall(function() tween(b.inst, 0.5, { [b.prop] = THEME[b.key] }) end)
+		end
+	end
+	bindings = alive
+	for _, fn in ipairs(refreshers) do pcall(fn) end
+end
+
+local function isPress(input)
+	return input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch
+end
+
+local function isMove(input)
+	return input.UserInputType == Enum.UserInputType.MouseMovement
+		or input.UserInputType == Enum.UserInputType.Touch
+end
+
+-- Перетаскивание (мышь и палец). onClick - если почти не двигали, onEnd - при отпускании.
+local function makeDraggable(handle, target, onClick, onEnd)
+	local dragging, dragStart, startPos, moved = false, nil, nil, 0
+	connect(handle.InputBegan, function(input)
+		if isPress(input) then
+			dragging = true
+			moved = 0
+			dragStart = input.Position
+			startPos = target.Position
+		end
+	end)
+	connect(UIS.InputChanged, function(input)
+		if dragging and isMove(input) then
+			local delta = input.Position - dragStart
+			moved = math.max(moved, delta.Magnitude)
+			target.Position = UDim2.new(
+				startPos.X.Scale, startPos.X.Offset + delta.X,
+				startPos.Y.Scale, startPos.Y.Offset + delta.Y
+			)
+		end
+	end)
+	connect(UIS.InputEnded, function(input)
+		if dragging and isPress(input) then
+			dragging = false
+			if onEnd then onEnd() end
+			if onClick and moved < 6 then onClick() end
+		end
+	end)
+end
+
+----------------------------------------------------------------
+-- Ключи и уровни доступа
+-- Три ключа независимы: каждый открывает ТОЛЬКО свой набор функций.
+----------------------------------------------------------------
+local TIER_ORDER = { "Developer", "Tester", "User" }
+local TIER_INFO = {
+	Developer = "полный доступ",
+	Tester = "расширенные функции и бета-скрипты",
+	User = "базовые функции",
+}
+
+local function tierSet(...)
+	local s = {}
+	for _, v in ipairs({ ... }) do s[v] = true end
+	return s
+end
+
+local DEV_TEST = tierSet("Developer", "Tester")
+local DEV_ONLY = tierSet("Developer")
+
+local Access = { tier = nil }
+local lockables = {}           -- строки с замком (обновляются при смене ключа)
+local keyEvent = Instance.new("BindableEvent")
+
+local function allowed(tiers)
+	if tiers == nil then return true end
+	return Access.tier ~= nil and tiers[Access.tier] == true
+end
+
+local function tierText(tiers)
+	local list = {}
+	for _, name in ipairs(TIER_ORDER) do
+		if tiers[name] then table.insert(list, name) end
+	end
+	return table.concat(list, " / ")
+end
+
+local function matchKey(str)
+	str = trim(str)
+	if str == "" then return nil end
+	for _, tier in ipairs(TIER_ORDER) do
+		local k = CONFIG.Keys[tier]
+		if type(k) == "string" and k ~= "" and str == k then return tier end
+	end
+	return nil
+end
+
+local function saveKey(k)
+	if not (CONFIG.SaveKey and writefile) then return end
+	pcall(writefile, CONFIG.KeyFile, k)
+end
+
+local function loadKey()
+	if not (CONFIG.SaveKey and isfile and readfile) then return nil end
+	local ok, res = pcall(function()
+		if isfile(CONFIG.KeyFile) then return readfile(CONFIG.KeyFile) end
+		return nil
+	end)
+	if ok and type(res) == "string" and res ~= "" then return res end
+	return nil
+end
+
+local function clearKey()
+	pcall(function()
+		if isfile and isfile(CONFIG.KeyFile) then
+			if delfile then delfile(CONFIG.KeyFile) elseif writefile then writefile(CONFIG.KeyFile, "") end
+		end
+	end)
+end
+
+-- объявлено заранее, чтобы кнопки могли вызывать (определяется в конце файла)
+local unload
+
+----------------------------------------------------------------
+-- ScreenGui
+----------------------------------------------------------------
+local gui = new("ScreenGui", {
+	Name = "installerScripts",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = true,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	DisplayOrder = 999,
+})
+do
+	local ok = pcall(function()
+		gui.Parent = (gethui and gethui()) or game:GetService("CoreGui")
+	end)
+	if not ok or not gui.Parent then
+		gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+	end
+end
+
+-- Слой под интерфейсом: линии ESP, круг FOV, прицел
+local espLayer = new("Frame", {
+	Name = "EspLayer",
+	Size = UDim2.fromScale(1, 1),
+	BackgroundTransparency = 1,
+	ZIndex = 1,
+}, gui)
+
+-- Всплывающие уведомления
+local function toast(text, kind)
+	local col = (kind == "err" and rgb(235, 90, 100)) or (kind == "ok" and rgb(90, 210, 130)) or THEME.accent2
+	local f = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, -70),
+		Size = UDim2.fromOffset(340, 44),
+		BackgroundColor3 = THEME.bg,
+		ZIndex = 200,
+	}, gui)
+	corner(f, 10)
+	stroke(f, col, 1.5, 0.1)
+	new("TextLabel", {
+		Position = UDim2.fromOffset(10, 0),
+		Size = UDim2.new(1, -20, 1, 0),
+		BackgroundTransparency = 1,
+		Text = text,
+		Font = Enum.Font.GothamMedium,
+		TextSize = 12,
+		TextColor3 = THEME.text,
+		TextWrapped = true,
+		ZIndex = 201,
+	}, f)
+	tween(f, 0.55, { Position = UDim2.new(0.5, 0, 0, 14) }, Enum.EasingStyle.Back)
+	task.delay(3.4, function()
+		tween(f, 0.4, { Position = UDim2.new(0.5, 0, 0, -70) }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+			.Completed:Connect(function() f:Destroy() end)
+	end)
+end
+
+----------------------------------------------------------------
+-- Утилиты: HTTP, буфер обмена, поиск игрока, пинг
+----------------------------------------------------------------
+local function httpGet(url)
+	local ok, res = pcall(function() return game:HttpGet(url) end)
+	if ok and type(res) == "string" and #res > 0 then return true, res end
+	local ok2, r = pcall(function()
+		local req = request or http_request or (syn and syn.request)
+		if not req then error("no request function") end
+		return req({ Url = url, Method = "GET" })
+	end)
+	if ok2 and type(r) == "table" and type(r.Body) == "string" and #r.Body > 0 then
+		return true, r.Body
+	end
+	return false, tostring(res)
+end
+
+local function copyText(text)
+	local fn = setclipboard or toclipboard or (syn and syn.write_clipboard)
+	if not fn then return false end
+	return (pcall(fn, text))
+end
+
+local function findPlayer(str)
+	str = lowerU(trim(str))
+	if str == "" then return nil end
+	local best
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer then
+			local n, d = p.Name:lower(), p.DisplayName:lower()
+			if n == str or d == str then return p end
+			if not best and (n:sub(1, #str) == str or d:sub(1, #str) == str) then best = p end
+		end
+	end
+	if best then return best end
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer and (p.Name:lower():find(str, 1, true) or p.DisplayName:lower():find(str, 1, true)) then
+			return p
+		end
+	end
+	return nil
+end
+
+local function getPing()
+	local ok, v = pcall(function() return Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
+	if ok and type(v) == "number" then return math.floor(v) end
+	local ok2, v2 = pcall(function() return LocalPlayer:GetNetworkPing() * 2000 end)
+	if ok2 and type(v2) == "number" then return math.floor(v2) end
+	return nil
+end
+
+----------------------------------------------------------------
+-- Состояния функций
+----------------------------------------------------------------
+local Fly = { enabled = false, speed = 60 }
+local State = {
+	walkOn = false, walk = 50,
+	jumpOn = false, jump = 100,
+	infJump = false, noclip = false, god = false,
+	bhop = false, antiVoid = false, freeze = false,
+	gravOn = false, grav = 100,
+	spin = false, spinSpeed = 20,
+	clickTp = false,
+	fullbright = false, noFog = false,
+	timeOn = false, time = 14,
+	fovOn = false, fov = 90,
+	zoom = false,
+	airWalk = false, trail = false, aura = false,
+	antiAfk = false, particles = true, hud = false,
+}
+local orig = {}
+local Keys = { down = {}, up = false, dn = false }
+local F = {} -- функции возможностей (чтобы не плодить локальные переменные)
+
+-- Реестр для ИИ-ассистента: какие переключатели и ползунки он умеет трогать
+local AI = { actions = {}, sliders = {}, history = {}, busy = false }
+local function regToggle(name, keys, obj)
+	table.insert(AI.actions, { name = name, keys = keys, obj = obj })
+	return obj
+end
+local function regSlider(name, keys, obj)
+	table.insert(AI.sliders, { name = name, keys = keys, obj = obj })
+	return obj
+end
+
+local function getChar()
+	local char = LocalPlayer.Character
+	return char,
+		char and char:FindFirstChild("HumanoidRootPart"),
+		char and char:FindFirstChildOfClass("Humanoid")
+end
+
+local function respawn()
+	local char, _, hum = getChar()
+	pcall(function() if hum then hum.Health = 0 end end)
+	pcall(function() if char then char:BreakJoints() end end)
+end
+
+----------------------------------------------------------------
+-- FLY (+ кнопки ▲ ▼ для телефона)
+----------------------------------------------------------------
+do
+	local flyVel, flyGyro, flyConn
+	local ControlModule
+
+	local flyPad = new("Frame", {
+		Name = "FlyPad",
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -20, 0.5, 0),
+		Size = UDim2.fromOffset(56, 120),
+		BackgroundTransparency = 1,
+		Visible = false,
+		ZIndex = 15,
+	}, gui)
+	local padScale = new("UIScale", { Scale = 0 }, flyPad)
+
+	local function padButton(text, y, onChange)
+		local b = new("TextButton", {
+			Position = UDim2.fromOffset(0, y),
+			Size = UDim2.fromOffset(56, 56),
+			BackgroundColor3 = "@bg",
+			BackgroundTransparency = 0.1,
+			Text = text,
+			Font = Enum.Font.GothamBold,
+			TextSize = 20,
+			TextColor3 = "@accent2",
+			AutoButtonColor = false,
+		}, flyPad)
+		roundCorner(b)
+		stroke(b, "@accent", 2, 0.1)
+		connect(b.InputBegan, function(input)
+			if isPress(input) then
+				onChange(true)
+				tween(b, 0.1, { BackgroundColor3 = THEME.accent, BackgroundTransparency = 0 })
+			end
+		end)
+		connect(b.InputEnded, function(input)
+			if isPress(input) then
+				onChange(false)
+				tween(b, 0.25, { BackgroundColor3 = THEME.bg, BackgroundTransparency = 0.1 })
+			end
+		end)
+	end
+	padButton("▲", 0, function(v) Keys.up = v end)
+	padButton("▼", 64, function(v) Keys.dn = v end)
+
+	local function showPad(show)
+		if not UIS.TouchEnabled then return end
+		if show then
+			flyPad.Visible = true
+			tween(padScale, 0.4, { Scale = 1 }, Enum.EasingStyle.Back)
+		else
+			Keys.up, Keys.dn = false, false
+			tween(padScale, 0.2, { Scale = 0 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+			task.delay(0.22, function()
+				if not Fly.enabled then flyPad.Visible = false end
+			end)
+		end
+	end
+
+	task.spawn(function()
+		local ok, mod = pcall(function()
+			local ps = LocalPlayer:WaitForChild("PlayerScripts", 5)
+			local pm = ps:WaitForChild("PlayerModule", 5)
+			return require(pm:WaitForChild("ControlModule", 5))
+		end)
+		if ok then ControlModule = mod end
+	end)
+
+	local function getMoveDir(humanoid, camCF)
+		if ControlModule then
+			local ok, mv = pcall(ControlModule.GetMoveVector, ControlModule)
+			if ok and typeof(mv) == "Vector3" then
+				return camCF.RightVector * mv.X + camCF.LookVector * -mv.Z
+			end
+		end
+		local md = humanoid.MoveDirection
+		if md.Magnitude < 0.01 then return Vector3.zero end
+		local look, right = camCF.LookVector, camCF.RightVector
+		local flatLook = Vector3.new(look.X, 0, look.Z)
+		flatLook = flatLook.Magnitude > 0.01 and flatLook.Unit or Vector3.new(0, 0, -1)
+		local flatRight = Vector3.new(right.X, 0, right.Z).Unit
+		return look * md:Dot(flatLook) + right * md:Dot(flatRight)
+	end
+
+	local function getVertical()
+		local d = Keys.down
+		local up = d[Enum.KeyCode.Space] or d[Enum.KeyCode.E] or Keys.up
+		local down = d[Enum.KeyCode.Q] or d[Enum.KeyCode.LeftControl] or Keys.dn
+		return (up and 1 or 0) - (down and 1 or 0)
+	end
+
+	local function cleanupFly()
+		if flyConn then flyConn:Disconnect() flyConn = nil end
+		if flyVel then flyVel:Destroy() flyVel = nil end
+		if flyGyro then flyGyro:Destroy() flyGyro = nil end
+		local _, _, hum = getChar()
+		if hum then hum.PlatformStand = false end
+	end
+
+	local function startFly()
+		cleanupFly()
+		local _, hrp, hum = getChar()
+		if not hrp or not hum then return end
+
+		flyVel = new("BodyVelocity", {
+			MaxForce = Vector3.new(9e9, 9e9, 9e9),
+			Velocity = Vector3.zero,
+		}, hrp)
+		flyGyro = new("BodyGyro", {
+			MaxTorque = Vector3.new(9e9, 9e9, 9e9),
+			P = 9e4,
+			D = 1e3,
+			CFrame = hrp.CFrame,
+		}, hrp)
+		hum.PlatformStand = true
+
+		flyConn = RunService.RenderStepped:Connect(function(dt)
+			local _, rootPart, humanoid = getChar()
+			local cam = workspace.CurrentCamera
+			if not (rootPart and humanoid and cam and flyVel and flyVel.Parent == rootPart) then return end
+
+			humanoid.PlatformStand = true
+			local camCF = cam.CFrame
+			local target = getMoveDir(humanoid, camCF) + Vector3.new(0, getVertical(), 0)
+			if target.Magnitude > 1 then target = target.Unit end
+
+			flyVel.Velocity = flyVel.Velocity:Lerp(target * Fly.speed, math.clamp(dt * 12, 0, 1))
+
+			local look = camCF.LookVector
+			local flat = Vector3.new(look.X, 0, look.Z)
+			if flat.Magnitude > 0.05 then
+				flyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + flat)
+			end
+		end)
+	end
+
+	F.setFly = function(state)
+		Fly.enabled = state
+		if state then startFly() else cleanupFly() end
+		showPad(state)
+	end
+	F.restartFly = function()
+		if Fly.enabled then startFly() end
+	end
+end
+
+connect(UIS.InputBegan, function(input, gp)
+	if input.UserInputType == Enum.UserInputType.Keyboard and not gp then
+		Keys.down[input.KeyCode] = true
+	end
+end)
+connect(UIS.InputEnded, function(input)
+	if input.UserInputType == Enum.UserInputType.Keyboard then
+		Keys.down[input.KeyCode] = nil
+	end
+end)
+
+----------------------------------------------------------------
+-- WalkSpeed, JumpPower, Noclip, God Mode, Spin, Freeze
+----------------------------------------------------------------
+F.setWalk = function(on)
+	State.walkOn = on
+	local _, _, hum = getChar()
+	if not hum then return end
+	if on then
+		orig.walk = hum.WalkSpeed
+	else
+		hum.WalkSpeed = orig.walk or 16
+	end
+end
+
+F.setJump = function(on)
+	State.jumpOn = on
+	local _, _, hum = getChar()
+	if not hum then return end
+	if on then
+		orig.useJP, orig.jp, orig.jh = hum.UseJumpPower, hum.JumpPower, hum.JumpHeight
+	elseif orig.useJP ~= nil then
+		hum.UseJumpPower = orig.useJP
+		hum.JumpPower = orig.jp
+		hum.JumpHeight = orig.jh
+	end
+end
+
+do
+	local touched = setmetatable({}, { __mode = "k" })
+	F.setNoclip = function(on)
+		State.noclip = on
+		if not on then
+			for part in pairs(touched) do
+				if part and part.Parent then part.CanCollide = true end
+			end
+			touched = setmetatable({}, { __mode = "k" })
+		end
+	end
+	connect(RunService.Stepped, function()
+		if not State.noclip then return end
+		local char = LocalPlayer.Character
+		if not char then return end
+		for _, p in ipairs(char:GetDescendants()) do
+			if p:IsA("BasePart") and p.CanCollide then
+				touched[p] = true
+				p.CanCollide = false
+			end
+		end
+	end)
+end
+
+F.setGod = function(on)
+	State.god = on
+	if not on then
+		local char, _, hum = getChar()
+		if hum then
+			pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Dead, true) end)
+		end
+		local ff = char and char:FindFirstChild("InstFF")
+		if ff then ff:Destroy() end
+	end
+end
+
+F.setFreeze = function(on)
+	State.freeze = on
+	if not on then
+		local _, hrp = getChar()
+		if hrp then hrp.Anchored = false end
+	end
+end
+
+do
+	local spinObj
+	F.setSpin = function(on)
+		State.spin = on
+		if spinObj then
+			spinObj:Destroy()
+			spinObj = nil
+		end
+		if on then
+			local _, hrp = getChar()
+			if hrp then
+				spinObj = Instance.new("BodyAngularVelocity")
+				spinObj.Name = "InstSpin"
+				spinObj.MaxTorque = Vector3.new(0, 9e9, 0)
+				spinObj.P = 1e5
+				spinObj.AngularVelocity = Vector3.new(0, State.spinSpeed, 0)
+				spinObj.Parent = hrp
+			end
+		end
+	end
+	F.setSpinSpeed = function(v)
+		State.spinSpeed = v
+		if spinObj and spinObj.Parent then
+			spinObj.AngularVelocity = Vector3.new(0, v, 0)
+		end
+	end
+end
+
+----------------------------------------------------------------
+-- НОВОЕ в 4.0: Air Walk, Rainbow Trail, Light Aura
+----------------------------------------------------------------
+do
+	-- Air Walk: невидимая (почти) платформа под ногами. Прыжок / E - выше, Q / Ctrl - ниже.
+	local pad, padY
+	F.setAirWalk = function(on)
+		State.airWalk = on
+		if on then
+			local _, hrp = getChar()
+			if hrp then padY = hrp.Position.Y - 3.4 end
+		else
+			if pad then pad:Destroy() pad = nil end
+			padY = nil
+		end
+	end
+	F.airTick = function(dt, hum, hrp)
+		if not State.airWalk or not hum or not hrp then return end
+		if not padY then padY = hrp.Position.Y - 3.4 end
+		if not pad or not pad.Parent then
+			pad = Instance.new("Part")
+			pad.Name = "InstAirWalk"
+			pad.Anchored = true
+			pad.CanCollide = true
+			pad.CastShadow = false
+			pad.Size = Vector3.new(7, 0.6, 7)
+			pad.Material = Enum.Material.Neon
+			pad.Transparency = 0.7
+			pad.Parent = workspace
+		end
+		local d = Keys.down
+		local up = d[Enum.KeyCode.E] or hum.Jump
+		local down = d[Enum.KeyCode.Q] or d[Enum.KeyCode.LeftControl]
+		if up then
+			padY = padY + 12 * dt
+		elseif down then
+			padY = padY - 12 * dt
+		end
+		pad.CFrame = CFrame.new(hrp.Position.X, padY, hrp.Position.Z)
+		pad.Color = THEME.accent2
+	end
+
+	-- Rainbow Trail: радужный шлейф за персонажем
+	local trail, a0, a1
+	local function killTrail()
+		if trail then trail:Destroy() trail = nil end
+		if a0 then a0:Destroy() a0 = nil end
+		if a1 then a1:Destroy() a1 = nil end
+	end
+	F.setTrail = function(on)
+		State.trail = on
+		killTrail()
+		if on then
+			local _, hrp = getChar()
+			if hrp then
+				a0 = Instance.new("Attachment")
+				a0.Name = "InstTrailA"
+				a0.Position = Vector3.new(0, 1.2, 0)
+				a0.Parent = hrp
+				a1 = Instance.new("Attachment")
+				a1.Name = "InstTrailB"
+				a1.Position = Vector3.new(0, -1.2, 0)
+				a1.Parent = hrp
+				trail = Instance.new("Trail")
+				trail.Name = "InstTrail"
+				trail.Attachment0 = a0
+				trail.Attachment1 = a1
+				trail.Lifetime = 0.9
+				trail.MinLength = 0.05
+				trail.LightEmission = 1
+				trail.Transparency = NumberSequence.new(0.1, 1)
+				trail.Parent = hrp
+			end
+		end
+	end
+	F.trailTick = function(t)
+		if trail and trail.Parent then
+			trail.Color = ColorSequence.new(
+				Color3.fromHSV((t * 0.3) % 1, 0.8, 1),
+				Color3.fromHSV((t * 0.3 + 0.35) % 1, 0.8, 1)
+			)
+		end
+	end
+
+	-- Light Aura: мягкий свет вокруг персонажа в цветах темы
+	local light
+	F.setAura = function(on)
+		State.aura = on
+		if light then light:Destroy() light = nil end
+		if on then
+			local _, hrp = getChar()
+			if hrp then
+				light = Instance.new("PointLight")
+				light.Name = "InstAura"
+				light.Range = 22
+				light.Brightness = 3
+				light.Shadows = false
+				light.Parent = hrp
+			end
+		end
+	end
+	F.auraTick = function(t)
+		if light and light.Parent then
+			light.Color = THEME.accent2:Lerp(THEME.accent, (math.sin(t * 2) + 1) / 2)
+		end
+	end
+end
+
+----------------------------------------------------------------
+-- Телепорт, сохранённая точка, наблюдение за игроком
+----------------------------------------------------------------
+F.tpTo = function(cf)
+	local _, hrp = getChar()
+	if hrp then
+		hrp.CFrame = cf
+		return true
+	end
+	return false
+end
+
+F.spec = { on = false, target = nil }
+
+F.stopSpectate = function(silent)
+	local sp = F.spec
+	local was = sp.on
+	sp.on, sp.target = false, nil
+	local cam = workspace.CurrentCamera
+	local _, _, hum = getChar()
+	if cam and hum then cam.CameraSubject = hum end
+	if was and not silent and F.onSpecEnd then F.onSpecEnd() end
+end
+
+F.startSpectate = function(plr)
+	local hum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
+	local cam = workspace.CurrentCamera
+	if not hum or not cam then return false end
+	F.spec.on, F.spec.target = true, plr
+	cam.CameraSubject = hum
+	return true
+end
+
+-- Click TP: Ctrl + клик на ПК, тап по миру на телефоне
+do
+	local mouse = LocalPlayer:GetMouse()
+	connect(UIS.InputBegan, function(input, gp)
+		if gp or not State.clickTp then return end
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			and (UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)) then
+			local hit = mouse.Hit
+			if hit then F.tpTo(CFrame.new(hit.Position + Vector3.new(0, 3, 0))) end
+		end
+	end)
+	connect(UIS.TouchTapInWorld, function(_, processed)
+		if processed or not State.clickTp then return end
+		task.defer(function()
+			local hit = mouse.Hit
+			if hit then F.tpTo(CFrame.new(hit.Position + Vector3.new(0, 3, 0))) end
+		end)
+	end)
+end
+
+----------------------------------------------------------------
+-- Мир: Fullbright, No Fog, время, гравитация, FOV, зум
+-- Каждое изменение запоминает оригинал и возвращает его при выключении.
+----------------------------------------------------------------
+do
+	local held = {}
+
+	local function hold(inst, prop, value)
+		local h = held[inst]
+		if not h then
+			h = {}
+			held[inst] = h
+		end
+		if h[prop] == nil then h[prop] = inst[prop] end
+		if inst[prop] ~= value then inst[prop] = value end
+	end
+
+	local function release(inst, prop)
+		local h = held[inst]
+		if h and h[prop] ~= nil then
+			local v = h[prop]
+			h[prop] = nil
+			pcall(function() inst[prop] = v end)
+		end
+	end
+
+	F.applyWorld = function()
+		local any = State.fullbright or State.noFog or State.timeOn
+			or State.gravOn or State.fovOn or State.zoom
+		if not any and next(held) == nil then return end
+
+		local want = {}
+		local function w(inst, prop, value)
+			local t = want[inst]
+			if not t then
+				t = {}
+				want[inst] = t
+			end
+			t[prop] = value
+		end
+
+		if State.fullbright then
+			w(Lighting, "Brightness", 2)
+			w(Lighting, "GlobalShadows", false)
+			w(Lighting, "Ambient", rgb(170, 170, 170))
+			w(Lighting, "OutdoorAmbient", rgb(170, 170, 170))
+		end
+		if State.timeOn then
+			w(Lighting, "ClockTime", State.time)
+		elseif State.fullbright then
+			w(Lighting, "ClockTime", 14)
+		end
+		if State.noFog then
+			w(Lighting, "FogEnd", 1e6)
+			for _, c in ipairs(Lighting:GetChildren()) do
+				if c:IsA("Atmosphere") then
+					w(c, "Density", 0)
+					w(c, "Haze", 0)
+				end
+			end
+		end
+		if State.gravOn then
+			w(workspace, "Gravity", State.grav)
+		end
+		if State.fovOn then
+			local cam = workspace.CurrentCamera
+			if cam then w(cam, "FieldOfView", State.fov) end
+		end
+		if State.zoom then
+			w(LocalPlayer, "CameraMaxZoomDistance", 1e5)
+			w(LocalPlayer, "CameraMinZoomDistance", 0)
+		end
+
+		for inst, props in pairs(want) do
+			for prop, value in pairs(props) do
+				pcall(hold, inst, prop, value)
+			end
+		end
+		for inst, props in pairs(held) do
+			for prop in pairs(props) do
+				local wp = want[inst]
+				if not (wp and wp[prop] ~= nil) then release(inst, prop) end
+			end
+		end
+	end
+end
+
+----------------------------------------------------------------
+-- Главный цикл персонажа (Heartbeat)
+----------------------------------------------------------------
+do
+	local lastSafe
+	F.resetSafe = function() lastSafe = nil end
+
+	connect(RunService.Heartbeat, function(dt)
+		local char, hrp, hum = getChar()
+
+		-- наблюдение: камера следует за целью
+		local sp = F.spec
+		if sp.on then
+			local tp = sp.target
+			local th = tp and tp.Parent and tp.Character and tp.Character:FindFirstChildOfClass("Humanoid")
+			local cam = workspace.CurrentCamera
+			if th and cam then
+				if cam.CameraSubject ~= th then cam.CameraSubject = th end
+			else
+				F.stopSpectate()
+				toast("Игрок вышел, наблюдение остановлено", "info")
+			end
+		end
+
+		if not hum then return end
+
+		if State.walkOn and hum.WalkSpeed ~= State.walk then
+			hum.WalkSpeed = State.walk
+		end
+		if State.jumpOn then
+			if not hum.UseJumpPower then hum.UseJumpPower = true end
+			if hum.JumpPower ~= State.jump then hum.JumpPower = State.jump end
+		end
+		if State.god then
+			if hum.Health < hum.MaxHealth then hum.Health = hum.MaxHealth end
+			if hum:GetStateEnabled(Enum.HumanoidStateType.Dead) then
+				hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+			end
+			if not char:FindFirstChild("InstFF") then
+				local ff = Instance.new("ForceField")
+				ff.Name = "InstFF"
+				ff.Visible = false
+				ff.Parent = char
+			end
+		end
+		if State.freeze and hrp and not hrp.Anchored then
+			hrp.Anchored = true
+		end
+
+		-- Bunny Hop: пробел на ПК, на телефоне - пока двигаешься
+		if State.bhop and not Fly.enabled and hum.FloorMaterial ~= Enum.Material.Air then
+			local want = UIS:IsKeyDown(Enum.KeyCode.Space)
+				or (UIS.TouchEnabled and not UIS.KeyboardEnabled and hum.MoveDirection.Magnitude > 0.1)
+			if want then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+		end
+
+		-- Anti-Void: возвращает на последнюю безопасную точку
+		if State.antiVoid and hrp then
+			local limit = math.max(workspace.FallenPartsDestroyHeight, -5000) + 40
+			if hrp.Position.Y < limit then
+				if lastSafe then
+					hrp.AssemblyLinearVelocity = Vector3.zero
+					hrp.CFrame = lastSafe
+				end
+			elseif hum.FloorMaterial ~= Enum.Material.Air then
+				lastSafe = hrp.CFrame + Vector3.new(0, 3, 0)
+			end
+		end
+
+		-- новые функции 4.0
+		F.airTick(dt, hum, hrp)
+		local t = os.clock()
+		F.trailTick(t)
+		F.auraTick(t)
+	end)
+end
+
+connect(UIS.JumpRequest, function()
+	if not State.infJump then return end
+	local _, _, hum = getChar()
+	if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+end)
+
+connect(LocalPlayer.Idled, function()
+	if not State.antiAfk then return end
+	pcall(function()
+		local vu = game:GetService("VirtualUser")
+		vu:CaptureController()
+		vu:ClickButton2(Vector2.new())
+	end)
+end)
+
+-- Респавн: возвращаем включённые функции
+connect(LocalPlayer.CharacterAdded, function(char)
+	char:WaitForChild("HumanoidRootPart", 5)
+	char:WaitForChild("Humanoid", 5)
+	task.wait(0.4)
+	F.resetSafe()
+	F.restartFly()
+	if State.spin then F.setSpin(true) end
+	if State.trail then F.setTrail(true) end
+	if State.aura then F.setAura(true) end
+	if State.airWalk then F.setAirWalk(true) end
+	if F.pendingCF then
+		local cf = F.pendingCF
+		F.pendingCF = nil
+		F.tpTo(cf)
+	end
+end)
+
+----------------------------------------------------------------
+-- Запуск чужих скриптов
+----------------------------------------------------------------
+-- url может быть строкой или списком запасных ссылок
+F.runUrl = function(url, label, status)
+	status = status or function() end
+	local list = (type(url) == "table") and url or { url }
+	local src
+	status("Скачиваю...", "info")
+	for _, u in ipairs(list) do
+		local ok, body = httpGet(u)
+		if ok then
+			src = body
+			break
+		end
+	end
+	if not src then
+		status("Не удалось скачать", "err")
+		toast(label .. ": не удалось скачать (проверь интернет)", "err")
+		return false
+	end
+	local ls = loadstring
+	if type(ls) ~= "function" then
+		status("loadstring недоступен", "err")
+		toast("В этом экзекуторе нет loadstring", "err")
+		return false
+	end
+	local fn, cerr = ls(src)
+	if not fn then
+		status("Ошибка в скрипте", "err")
+		toast(label .. ": " .. string.sub(tostring(cerr), 1, 90), "err")
+		return false
+	end
+	status("Запускаю...", "info")
+	local okR, rerr = pcall(fn)
+	if not okR then
+		status("Ошибка при запуске", "err")
+		toast(label .. ": " .. string.sub(tostring(rerr), 1, 90), "err")
+		return false
+	end
+	status("Запущено", "ok")
+	toast(label .. " запущен", "ok")
+	return true
+end
+
+F.runCode = function(code)
+	if type(code) ~= "string" or string.match(code, "^%s*$") then
+		toast("Поле кода пустое", "err")
+		return false
+	end
+	local ls = loadstring
+	if type(ls) ~= "function" then
+		toast("В этом экзекуторе нет loadstring", "err")
+		return false
+	end
+	local fn, cerr = ls(code)
+	if not fn then
+		toast("Ошибка: " .. string.sub(tostring(cerr), 1, 90), "err")
+		return false
+	end
+	local ok, rerr = pcall(fn)
+	if not ok then
+		toast("Ошибка: " .. string.sub(tostring(rerr), 1, 90), "err")
+		return false
+	end
+	toast("Код выполнен", "ok")
+	return true
+end
+
+----------------------------------------------------------------
+-- VISUALS: ESP Lines, Chams, Crosshair, Aimbot
+----------------------------------------------------------------
+local DIST_MAX = 5000 -- на этом значении ползунок дистанции = без ограничения
+
+local ESP = {
+	enabled = false,
+	origin = "Bottom",   -- Bottom / Center / Top
+	target = "Body",     -- Head / Body / Feet
+	color = "Red",
+	thickness = 2,
+	opacity = 0.85,
+	maxDist = DIST_MAX,
+	teamCheck = false,
+	names = false,
+	distance = false,
+	health = false,
+	objects = {},
+	wasOn = false,
+}
+
+ESP.colors = {
+	{ name = "White",   color = rgb(255, 255, 255) },
+	{ name = "Red",     color = rgb(255, 70, 70) },
+	{ name = "Gold",    color = rgb(255, 200, 70) },
+	{ name = "Green",   color = rgb(80, 235, 120) },
+	{ name = "Cyan",    color = rgb(70, 225, 255) },
+	{ name = "Blue",    color = rgb(80, 130, 255) },
+	{ name = "Purple",  color = rgb(180, 100, 255) },
+	{ name = "Pink",    color = rgb(255, 110, 190) },
+}
+ESP.colorMap = {}
+for _, e in ipairs(ESP.colors) do
+	e.seq = ColorSequence.new(e.color)
+	ESP.colorMap[e.name] = e.color
+end
+table.insert(ESP.colors, {
+	name = "Team",
+	seq = ColorSequence.new(rgb(255, 80, 80), rgb(80, 140, 255)),
+})
+table.insert(ESP.colors, {
+	name = "Rainbow",
+	seq = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, rgb(255, 80, 80)),
+		ColorSequenceKeypoint.new(0.33, rgb(255, 220, 80)),
+		ColorSequenceKeypoint.new(0.66, rgb(80, 255, 140)),
+		ColorSequenceKeypoint.new(1, rgb(80, 140, 255)),
+	}),
+})
+
+function ESP.pickColor(name, plr, t, idx)
+	if name == "Rainbow" then
+		return Color3.fromHSV((t * 0.25 + idx * 0.07) % 1, 0.85, 1)
+	elseif name == "Team" then
+		return (plr.Team and plr.TeamColor.Color) or Color3.new(1, 1, 1)
+	end
+	return ESP.colorMap[name] or Color3.new(1, 1, 1)
+end
+
+local Aim = {
+	enabled = false,
+	part = "Head",       -- Head / Torso
+	mode = "Always",     -- Always / Hold RMB
+	fov = 150,
+	smooth = 35,
+	teamCheck = true,
+	wallCheck = false,
+	showFov = true,
+	maxDist = DIST_MAX,
+}
+
+local Cham = {
+	enabled = false,
+	fill = 0.5,
+	outline = true,
+	teamCheck = false,
+	objects = {},
+	wasOn = false,
+}
+
+local function isEnemy(plr, teamCheck)
+	if not teamCheck then return true end
+	local a, b = LocalPlayer.Team, plr.Team
+	if a == nil or b == nil then return true end
+	return a ~= b
+end
+
+-- Круг FOV для аима
+Aim.circle = new("Frame", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(Aim.fov * 2, Aim.fov * 2),
+	BackgroundTransparency = 1,
+	Visible = false,
+}, espLayer)
+roundCorner(Aim.circle)
+stroke(Aim.circle, "@accent2", 1.5, 0.2)
+
+-- Прицел в центре экрана
+local Cross = {}
+do
+	local holder = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(30, 30),
+		BackgroundTransparency = 1,
+		Visible = false,
+	}, espLayer)
+	local function mark(pos, size)
+		new("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = pos,
+			Size = size,
+			BackgroundColor3 = "@accent2",
+			BorderSizePixel = 0,
+		}, holder)
+	end
+	mark(UDim2.fromScale(0.5, 0.14), UDim2.fromOffset(2, 8))
+	mark(UDim2.fromScale(0.5, 0.86), UDim2.fromOffset(2, 8))
+	mark(UDim2.fromScale(0.14, 0.5), UDim2.fromOffset(8, 2))
+	mark(UDim2.fromScale(0.86, 0.5), UDim2.fromOffset(8, 2))
+	mark(UDim2.fromScale(0.5, 0.5), UDim2.fromOffset(2, 2))
+	Cross.holder = holder
+end
+
+function ESP.getObject(plr)
+	local o = ESP.objects[plr]
+	if o then return o end
+	o = {
+		line = new("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = Color3.new(1, 1, 1),
+			BorderSizePixel = 0,
+			Visible = false,
+		}, espLayer),
+		label = new("TextLabel", {
+			AnchorPoint = Vector2.new(0.5, 1),
+			Size = UDim2.fromOffset(180, 14),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			TextSize = 12,
+			TextStrokeTransparency = 0.4,
+			TextStrokeColor3 = Color3.new(0, 0, 0),
+			Visible = false,
+		}, espLayer),
+	}
+	ESP.objects[plr] = o
+	return o
+end
+
+function ESP.hideAll()
+	for _, o in pairs(ESP.objects) do
+		o.line.Visible = false
+		o.label.Visible = false
+	end
+end
+
+local chamFolder = new("Folder", { Name = "Chams" }, gui)
+
+connect(Players.PlayerRemoving, function(plr)
+	local o = ESP.objects[plr]
+	if o then
+		o.line:Destroy()
+		o.label:Destroy()
+		ESP.objects[plr] = nil
+	end
+	local h = Cham.objects[plr]
+	if h then
+		h:Destroy()
+		Cham.objects[plr] = nil
+	end
+end)
+
+local function targetPosition(char, kind)
+	if kind == "Head" then
+		local h = char:FindFirstChild("Head")
+		return h and h.Position
+	end
+	local r = char:FindFirstChild("HumanoidRootPart")
+	if not r then return nil end
+	if kind == "Feet" then return r.Position - Vector3.new(0, 3, 0) end
+	return r.Position
+end
+
+function ESP.update(cam, t)
+	if not ESP.enabled then
+		if ESP.wasOn then
+			ESP.wasOn = false
+			ESP.hideAll()
+		end
+		return
+	end
+	ESP.wasOn = true
+
+	local vp = cam.ViewportSize
+	local origin
+	if ESP.origin == "Center" then
+		origin = vp / 2
+	elseif ESP.origin == "Top" then
+		origin = Vector2.new(vp.X / 2, 0)
+	else
+		origin = Vector2.new(vp.X / 2, vp.Y)
+	end
+
+	local _, myRoot = getChar()
+	local myPos = myRoot and myRoot.Position or cam.CFrame.Position
+	local idx = 0
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer then
+			idx = idx + 1
+			local o = ESP.getObject(plr)
+			local show = false
+			local char = plr.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			local pos = (hum and hum.Health > 0) and targetPosition(char, ESP.target) or nil
+
+			if pos and isEnemy(plr, ESP.teamCheck) then
+				local dist = (pos - myPos).Magnitude
+				if ESP.maxDist >= DIST_MAX or dist <= ESP.maxDist then
+					local v = cam:WorldToViewportPoint(pos)
+					if v.Z > 0 then
+						show = true
+						local p2 = Vector2.new(v.X, v.Y)
+						local d = p2 - origin
+						local col = ESP.pickColor(ESP.color, plr, t, idx)
+
+						local line = o.line
+						line.Size = UDim2.fromOffset(d.Magnitude, ESP.thickness)
+						line.Position = UDim2.fromOffset((origin.X + p2.X) / 2, (origin.Y + p2.Y) / 2)
+						line.Rotation = math.deg(math.atan2(d.Y, d.X))
+						line.BackgroundColor3 = col
+						line.BackgroundTransparency = 1 - ESP.opacity
+
+						-- имя / дистанция / здоровье
+						local label = o.label
+						local showText = (ESP.names or ESP.distance or ESP.health)
+							and p2.X > 0 and p2.X < vp.X and p2.Y > 0 and p2.Y < vp.Y
+						if showText then
+							local parts = {}
+							if ESP.names then table.insert(parts, plr.DisplayName) end
+							if ESP.distance then table.insert(parts, "[" .. math.floor(dist) .. "]") end
+							if ESP.health then table.insert(parts, math.floor(hum.Health) .. "hp") end
+							label.Text = table.concat(parts, "  ")
+							label.TextColor3 = col
+							label.Position = UDim2.fromOffset(p2.X, p2.Y - 8)
+						end
+						label.Visible = showText
+					end
+				end
+			end
+
+			o.line.Visible = show
+			if not show then o.label.Visible = false end
+		end
+	end
+end
+
+-- Chams: подсветка игроков сквозь стены (Highlight)
+function Cham.update(t)
+	if not Cham.enabled then
+		if Cham.wasOn then
+			Cham.wasOn = false
+			for _, h in pairs(Cham.objects) do h.Enabled = false end
+		end
+		return
+	end
+	Cham.wasOn = true
+	local idx = 0
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer then
+			idx = idx + 1
+			local h = Cham.objects[plr]
+			if not h then
+				h = Instance.new("Highlight")
+				h.Name = "Cham"
+				h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+				h.Parent = chamFolder
+				Cham.objects[plr] = h
+			end
+			local char = plr.Character
+			if char and isEnemy(plr, Cham.teamCheck) then
+				local col = ESP.pickColor(ESP.color, plr, t, idx)
+				h.Adornee = char
+				h.FillColor = col
+				h.OutlineColor = col:Lerp(Color3.new(1, 1, 1), 0.35)
+				h.FillTransparency = Cham.fill
+				h.OutlineTransparency = Cham.outline and 0 or 1
+				h.Enabled = true
+			else
+				h.Enabled = false
+			end
+		end
+	end
+end
+
+local aimParams = RaycastParams.new()
+aimParams.FilterType = Enum.RaycastFilterType.Exclude
+
+local function aimPartOf(char)
+	if Aim.part == "Head" then return char:FindFirstChild("Head") end
+	return char:FindFirstChild("HumanoidRootPart")
+		or char:FindFirstChild("UpperTorso")
+		or char:FindFirstChild("Torso")
+end
+
+function Aim.update(cam, dt)
+	Aim.circle.Visible = Aim.enabled and Aim.showFov
+	if not Aim.enabled then return end
+	if Aim.mode == "Hold RMB" and not UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+		return
+	end
+
+	local center = cam.ViewportSize / 2
+	local camPos = cam.CFrame.Position
+	local bestPart, bestD
+	aimParams.FilterDescendantsInstances = { LocalPlayer.Character }
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer and isEnemy(plr, Aim.teamCheck) then
+			local char = plr.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			local part = char and aimPartOf(char)
+			if hum and hum.Health > 0 and part then
+				local v = cam:WorldToViewportPoint(part.Position)
+				if v.Z > 0 then
+					local d = (Vector2.new(v.X, v.Y) - center).Magnitude
+					if d <= Aim.fov and (not bestD or d < bestD) then
+						local ok = true
+						if Aim.maxDist < DIST_MAX then
+							ok = (part.Position - camPos).Magnitude <= Aim.maxDist
+						end
+						if ok and Aim.wallCheck then
+							local res = workspace:Raycast(camPos, part.Position - camPos, aimParams)
+							ok = (res == nil) or res.Instance:IsDescendantOf(char)
+						end
+						if ok then
+							bestPart, bestD = part, d
+						end
+					end
+				end
+			end
+		end
+	end
+
+	if bestPart then
+		local cf = cam.CFrame
+		local goal = CFrame.lookAt(cf.Position, bestPart.Position)
+		local s = math.clamp(Aim.smooth / 100, 0, 0.97)
+		local alpha = 1 - s ^ (dt * 60)
+		cam.CFrame = cf:Lerp(goal, alpha)
+	end
+end
+
+-- Выполняется после обновления камеры, чтобы аим не перебивался
+RunService:BindToRenderStep("InstallerScripts_Main", Enum.RenderPriority.Camera.Value + 1, function(dt)
+	local cam = workspace.CurrentCamera
+	if not cam then return end
+	local t = os.clock()
+	ESP.update(cam, t)
+	Cham.update(t)
+	Aim.update(cam, dt)
+	F.applyWorld()
+end)
